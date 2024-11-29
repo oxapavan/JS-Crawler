@@ -15,7 +15,7 @@ session = requests.Session()
 
 def fetch_page(url, cookies=None, retries=3, delay=5):
     """Fetch the content of a webpage with retries."""
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.5845.97 Safari/537.36 Edge/116.0.1938.76"}
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36"}
     
     session.headers.update(headers)
     session.cookies.update(cookies or {})
@@ -112,8 +112,9 @@ def main():
 
     if js_files:
         print(Fore.YELLOW + "\nDownloading JavaScript files...")
-        download_js_files(js_files, output_dir="downloaded_js")
-        print(Fore.GREEN + f"\nDownloaded {len(js_files)} JavaScript files. Check the 'downloaded_js' folder.")
+        output_folder = "output"  # Folder where the JS files will be saved
+        download_js_files(js_files, output_dir=output_folder)
+        print(Fore.GREEN + f"\nDownloaded {len(js_files)} JavaScript files. Check the '{output_folder}' folder.")
     else:
         print(Fore.RED + "No JavaScript files found.")
 
