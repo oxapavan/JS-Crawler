@@ -1,4 +1,5 @@
 import os
+import re
 import hashlib
 import requests
 from bs4 import BeautifulSoup
@@ -75,17 +76,110 @@ def download_js_file(js_url, output_dir):
             f.write(response.text)
         
         print(Fore.GREEN + f"Downloaded: {js_url} as {filename}")
+        return filepath
     except requests.RequestException as e:
         print(Fore.RED + f"Failed to download {js_url}: {e}")
+        return None
 
 def download_js_files(js_files, output_dir):
     """Download JavaScript files in parallel."""
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
+    downloaded_files = []
     with ThreadPoolExecutor(max_workers=5) as executor:
-        for js_url in js_files:
-            executor.submit(download_js_file, js_url, output_dir)
+        # Use list comprehension to collect downloaded file paths
+        downloaded_files = list(filter(None, list(executor.map(lambda url: download_js_file(url, output_dir), js_files))))
+    
+    return downloaded_files
+
+def scan_for_sensitive_keywords(directory):
+    """
+    Recursively scan JavaScript files for sensitive keywords.
+    
+    Args:
+        directory (str): Path to the directory containing JavaScript files
+    
+    Returns:
+        dict: A dictionary containing file paths and their matched sensitive keywords
+    """
+    # Sensitive keyword categories
+    sensitive_keywords = {
+        'eval_related': [
+            'eval', 'innerHTML', 'document.write', 'location.href', 
+            'localStorage', 'sessionStorage', 'XMLHttpRequest', 'fetch'
+        ],
+        'security_risks': [
+            'unsafe-inline', 'untrusted input', 'external scripts', 
+            'Subresource Integrity (SRI)', 'CSRF protection'
+        ],
+        'authentication': [
+            'username', 'userID=', 'email=', 'token=', 'auth_key=', 
+            'password', 'credentials'
+        ],
+        'cloud_credentials': [
+            'aws access key', 'aws secret key', 'api key', 
+            'admin credential', 'secret token', 
+            'oauth_token', 'oauth token secret'
+        ]
+    }
+    
+    # Results dictionary to store findings
+    findings = {}
+    
+    # Recursively scan files
+    for root, _, files in os.walk(directory):
+        for file in files:
+            if file.endswith('.js'):
+                filepath = os.path.join(root, file)
+                file_findings = {}
+                
+                try:
+                    with open(filepath, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                        
+                    # Search through each category of keywords
+                    for category, keywords in sensitive_keywords.items():
+                        matched_keywords = []
+                        
+                        for keyword in keywords:
+                            # Use case-insensitive regex to find whole or partial matches
+                            # This helps catch variations and context
+                            pattern = re.compile(rf'\b{re.escape(keyword)}\b', re.IGNORECASE)
+                            if pattern.search(content):
+                                matched_keywords.append(keyword)
+                        
+                        # Only add category if keywords were found
+                        if matched_keywords:
+                            file_findings[category] = matched_keywords
+                
+                except Exception as e:
+                    print(f"Error reading {filepath}: {e}")
+                
+                # Add to main findings if any keywords were found
+                if file_findings:
+                    findings[filepath] = file_findings
+    
+    return findings
+
+def print_security_scan_results(findings):
+    """
+    Print security scan results in a user-friendly format.
+    
+    Args:
+        findings (dict): Dictionary of security keyword findings
+    """
+    if not findings:
+        print(Fore.GREEN + "\n🟢 No sensitive keywords detected in JavaScript files.")
+        return
+    
+    print(Fore.RED + "\n⚠️ Potential Security Risks Detected:")
+    for filepath, categories in findings.items():
+        print(f"\nFile: {filepath}")
+        for category, keywords in categories.items():
+            print(f"  🔴 {category.replace('_', ' ').title()} Risks:")
+            for keyword in keywords:
+                print(f"    - {keyword}")
 
 def main():
     # Input the URL and optional cookies
@@ -113,8 +207,17 @@ def main():
     if js_files:
         print(Fore.YELLOW + "\nDownloading JavaScript files...")
         output_folder = "output"  # Folder where the JS files will be saved
-        download_js_files(js_files, output_dir=output_folder)
-        print(Fore.GREEN + f"\nDownloaded {len(js_files)} JavaScript files. Check the '{output_folder}' folder.")
+        downloaded_files = download_js_files(js_files, output_dir=output_folder)
+        
+        if downloaded_files:
+            print(Fore.GREEN + f"\nDownloaded {len(downloaded_files)} JavaScript files. Check the '{output_folder}' folder.")
+            
+            # Add security scanning
+            print(Fore.YELLOW + "\nPerforming security keyword scan...")
+            security_findings = scan_for_sensitive_keywords(output_folder)
+            print_security_scan_results(security_findings)
+        else:
+            print(Fore.RED + "No JavaScript files were successfully downloaded.")
     else:
         print(Fore.RED + "No JavaScript files found.")
 
