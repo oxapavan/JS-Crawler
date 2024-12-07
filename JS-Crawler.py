@@ -95,37 +95,79 @@ def download_js_files(js_files, output_dir):
 
 def scan_for_sensitive_keywords(directory):
     """
-    Recursively scan JavaScript files for sensitive keywords.
+    Recursively scan JavaScript files for sensitive keywords and patterns.
     
     Args:
         directory (str): Path to the directory containing JavaScript files
     
     Returns:
-        dict: A dictionary containing file paths and their matched sensitive keywords
+        dict: A dictionary containing file paths and their matched sensitive patterns
     """
-    # Sensitive keyword categories
-    sensitive_keywords = {
-        'eval_related': [
-            'eval', 'innerHTML', 'document.write', 'location.href', 
-            'localStorage', 'sessionStorage', 'XMLHttpRequest', 'fetch'
+    # Comprehensive regex patterns inspired by the Go regex patterns
+    sensitive_patterns = {
+        'Cloud & API Credentials': [
+            (r'AIza[0-9A-Za-z-_]{35}', 'Google API Key'),
+            (r'AAAA[A-Za-z0-9_-]{7}:[A-Za-z0-9_-]{140}', 'Firebase Token'),
+            (r'AKIA[0-9A-Z]{16}', 'AWS Access Key ID'),
+            (r'sk_live_[0-9a-zA-Z]{24}', 'Stripe API Key'),
+            (r'xoxb-[A-Za-z0-9-]{24,34}', 'Slack Bot Token'),
+            (r'pk_live_[0-9a-zA-Z]{24}', 'Stripe Publishable Key'),
+            (r'ya29\.[0-9A-Za-z\-_]+', 'Google OAuth Access Token'),
+            (r'sq0csp-[0-9A-Za-z\-_]{43}', 'Square OAuth Secret'),
+            (r'sq0atp-[0-9A-Za-z\-_]{22}', 'Square Access Token')
         ],
-        'security_risks': [
-            'unsafe-inline', 'untrusted input', 'external scripts', 
-            'Subresource Integrity (SRI)', 'CSRF protection'
+        'Authorization Tokens': [
+            (r'bearer [a-zA-Z0-9_\-\.=:_\+\/]{5,100}', 'Bearer Token'),
+            (r'Basic [a-zA-Z0-9=:_\+\/-]{5,100}', 'Basic Auth Token'),
+            (r'ghp_[a-zA-Z0-9]{36}', 'GitHub Personal Access Token'),
+            (r'glpat-[A-Za-z0-9\-]{20}', 'GitLab Personal Access Token'),
+            (r'[hH]eroku[a-zA-Z0-9]{32}', 'Heroku API Key'),
+            (r'\bghp_[a-zA-Z0-9]{36}\b', 'GitHub Token'),
+            (r'xoxp-[A-Za-z0-9-]{24,34}', 'Slack User Token')
         ],
-        'authentication': [
-            'username', 'userID=', 'email=', 'token=', 'auth_key=', 
-            'password', 'credentials'
+        'Private Keys': [
+            (r'-----BEGIN RSA PRIVATE KEY-----', 'RSA Private Key'),
+            (r'-----BEGIN OPENSSH PRIVATE KEY-----', 'OpenSSH Private Key'),
+            (r'-----BEGIN EC PRIVATE KEY-----', 'EC Private Key'),
+            (r'-----BEGIN DSA PRIVATE KEY-----', 'DSA Private Key'),
+            (r'-----BEGIN PGP PRIVATE KEY BLOCK-----', 'PGP Private Key'),
+            (r'PuTTY-User-Key-File-2.*?-----END', 'PuTTY Private Key')
         ],
-        'cloud_credentials': [
-            'aws access key', 'aws secret key', 'api key', 
-            'admin credential', 'secret token', 
-            'oauth_token', 'oauth token secret'
+        'Sensitive Information': [
+            (r'\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', 'Email Address'),
+            (r'\b\+\d{9,14}\b', 'Phone Number'),
+            (r'username=|password=', 'Potential Credential Indicators'),
+            (r'[a-zA-Z]{3,10}://[^/\s:@]{3,20}:[^/\s:@]{3,20}@.{1,100}["\'\s]', 'Credentials in URL')
+        ],
+        'Web Service Credentials': [
+            (r'https://hooks\.slack\.com/services/[A-Za-z0-9]+/[A-Za-z0-9]+/[A-Za-z0-9]+', 'Slack Webhook'),
+            (r'https://discord(?:app)?\.com/api/webhooks/[0-9]{18,20}/[A-Za-z0-9_-]{64,}', 'Discord Webhook'),
+            (r'sq0atp-[0-9A-Za-z\-_]{22}', 'Square Access Token'),
+            (r'SG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}', 'SendGrid API Key'),
+            (r'sk_[A-Za-z0-9]{32}', 'Segment Write Key')
+        ],
+        'OAuth & Client Secrets': [
+            (r'"client_secret":"[a-zA-Z0-9-_]{24}"', 'OAuth Client Secret'),
+            (r'\b[0-9]+-[0-9A-Za-z_]{32}\.apps\.googleusercontent\.com\b', 'Google OAuth Client'),
+            (r'[A-Za-z0-9]{20,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{25,}', 'Atlassian Access Token')
+        ],
+        'Additional Token Types': [
+            (r'[MN][A-Za-z\d]{23}\.[\w-]{6}\.[\w-]{27}', 'Discord Bot Token'),
+            (r'sk_live_[0-9a-z]{32}', 'Picatic API Key'),
+            (r'access_token\$production\$[0-9a-z]{16}\$[0-9a-f]{32}', 'PayPal Braintree Access Token'),
+            (r'00[a-zA-Z0-9]{30}\.[a-zA-Z0-9\-_]{30,}\.[a-zA-Z0-9\-_]{30,}', 'Okta API Token')
         ]
     }
     
     # Results dictionary to store findings
     findings = {}
+    
+    # Compile regex patterns
+    compiled_patterns = {
+        category: [(re.compile(pattern, re.IGNORECASE), desc) 
+                   for pattern, desc in patterns]
+        for category, patterns in sensitive_patterns.items()
+    }
     
     # Recursively scan files
     for root, _, files in os.walk(directory):
@@ -138,25 +180,23 @@ def scan_for_sensitive_keywords(directory):
                     with open(filepath, 'r', encoding='utf-8') as f:
                         content = f.read()
                         
-                    # Search through each category of keywords
-                    for category, keywords in sensitive_keywords.items():
-                        matched_keywords = []
+                    # Search through each category of patterns
+                    for category, pattern_list in compiled_patterns.items():
+                        matched_patterns = []
                         
-                        for keyword in keywords:
-                            # Use case-insensitive regex to find whole or partial matches
-                            # This helps catch variations and context
-                            pattern = re.compile(rf'\b{re.escape(keyword)}\b', re.IGNORECASE)
-                            if pattern.search(content):
-                                matched_keywords.append(keyword)
+                        for pattern, description in pattern_list:
+                            matches = pattern.findall(content)
+                            if matches:
+                                matched_patterns.append((description, matches[:3]))  # Limit to first 3 matches
                         
-                        # Only add category if keywords were found
-                        if matched_keywords:
-                            file_findings[category] = matched_keywords
+                        # Only add category if patterns were found
+                        if matched_patterns:
+                            file_findings[category] = matched_patterns
                 
                 except Exception as e:
                     print(f"Error reading {filepath}: {e}")
                 
-                # Add to main findings if any keywords were found
+                # Add to main findings if any patterns were found
                 if file_findings:
                     findings[filepath] = file_findings
     
@@ -167,19 +207,21 @@ def print_security_scan_results(findings):
     Print security scan results in a user-friendly format.
     
     Args:
-        findings (dict): Dictionary of security keyword findings
+        findings (dict): Dictionary of security pattern findings
     """
     if not findings:
-        print(Fore.GREEN + "\n🟢 No sensitive keywords detected in JavaScript files.")
+        print(Fore.GREEN + "\n🟢 No sensitive patterns detected in JavaScript files.")
         return
     
     print(Fore.RED + "\n⚠️ Potential Security Risks Detected:")
     for filepath, categories in findings.items():
         print(f"\nFile: {filepath}")
-        for category, keywords in categories.items():
-            print(f"  🔴 {category.replace('_', ' ').title()} Risks:")
-            for keyword in keywords:
-                print(f"    - {keyword}")
+        for category, patterns in categories.items():
+            print(f"  🔴 {category}:")
+            for description, matches in patterns:
+                print(f"    - {description}")
+                for match in matches:
+                    print(f"      • {match}")
 
 def main():
     # Input the URL and optional cookies
@@ -213,7 +255,7 @@ def main():
             print(Fore.GREEN + f"\nDownloaded {len(downloaded_files)} JavaScript files. Check the '{output_folder}' folder.")
             
             # Add security scanning
-            print(Fore.YELLOW + "\nPerforming security keyword scan...")
+            print(Fore.YELLOW + "\nPerforming comprehensive security pattern scan...")
             security_findings = scan_for_sensitive_keywords(output_folder)
             print_security_scan_results(security_findings)
         else:
