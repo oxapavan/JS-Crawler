@@ -93,6 +93,21 @@ def download_js_files(js_files, output_dir):
     
     return downloaded_files
 
+def find_subdomains(domain):
+    """Find all subdomains for a given domain using crt.sh."""
+    url = f"https://crt.sh/?q=%25.{domain}&output=json"
+    try:
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+        data = response.json()
+        subdomains = set()
+        for entry in data:
+            subdomains.add(entry['name_value'].lower())
+        return list(subdomains)
+    except requests.RequestException as e:
+        print(Fore.RED + f"Failed to fetch subdomains: {e}")
+        return []
+
 def scan_for_sensitive_keywords(directory):
     """
     Recursively scan JavaScript files for sensitive keywords and patterns.
@@ -224,8 +239,8 @@ def print_security_scan_results(findings):
                     print(f"      • {match}")
 
 def main():
-    # Input the URL and optional cookies
-    url = input(Fore.CYAN + "Enter the URL to crawl: ").strip()
+    # Input the domain to find subdomains
+    domain = input(Fore.CYAN + "Enter the domain to find subdomains: ").strip()
     cookie_str = input(Fore.CYAN + "Enter cookies (if any, in 'key=value; key2=value2' format, or press Enter to skip): ").strip()
 
     cookies = None
@@ -236,20 +251,30 @@ def main():
             print(Fore.RED + "Invalid cookie format. Please use 'key=value; key2=value2'.")
             return
 
-    print(Fore.YELLOW + "\nFetching the webpage...")
-    html = fetch_page(url, cookies=cookies)
-    if not html:
-        print(Fore.RED + "Failed to fetch the webpage.")
+    print(Fore.YELLOW + "\nFinding subdomains...")
+    subdomains = find_subdomains(domain)
+    if not subdomains:
+        print(Fore.RED + "No subdomains found.")
         return
 
-    print(Fore.YELLOW + "\nExtracting JavaScript files...")
-    js_files = extract_js_files(html, url)
-    print(Fore.GREEN + f"Found {len(js_files)} JavaScript files.")
+    print(Fore.GREEN + f"Found {len(subdomains)} subdomains.")
+    output_folder = "output"  # Folder where the JS files will be saved
 
-    if js_files:
+    all_js_files = []
+    for subdomain in subdomains:
+        print(Fore.YELLOW + f"\nFetching the webpage for subdomain: {subdomain}")
+        html = fetch_page(f"http://{subdomain}", cookies=cookies)
+        if not html:
+            continue
+
+        print(Fore.YELLOW + f"Extracting JavaScript files from {subdomain}...")
+        js_files = extract_js_files(html, f"http://{subdomain}")
+        print(Fore.GREEN + f"Found {len(js_files)} JavaScript files in {subdomain}.")
+        all_js_files.extend(js_files)
+
+    if all_js_files:
         print(Fore.YELLOW + "\nDownloading JavaScript files...")
-        output_folder = "output"  # Folder where the JS files will be saved
-        downloaded_files = download_js_files(js_files, output_dir=output_folder)
+        downloaded_files = download_js_files(all_js_files, output_dir=output_folder)
         
         if downloaded_files:
             print(Fore.GREEN + f"\nDownloaded {len(downloaded_files)} JavaScript files. Check the '{output_folder}' folder.")
@@ -261,7 +286,7 @@ def main():
         else:
             print(Fore.RED + "No JavaScript files were successfully downloaded.")
     else:
-        print(Fore.RED + "No JavaScript files found.")
+        print(Fore.RED + "No JavaScript files found in any subdomains.")
 
 if __name__ == "__main__":
     main()
